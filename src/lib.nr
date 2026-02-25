@@ -4,5 +4,5 @@
 mod wad;
 
 pub use wad::{
-    fromU128, toWad, truncate, divide, add, sub, mul, mulDiv,
+    fromU128, toWad, truncate, wad_mul, add, sub, wad_div, wad_mul_div,
 };
