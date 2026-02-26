@@ -73,7 +73,7 @@ Add the library to your `Nargo.toml`:
 
 ```toml
 [dependencies]
-wad = { git = "https://github.com/merkle-groot/Noir-Wad" }
+wad = { git = "https://github.com/merkle-groot/Noir-Wad", tag = "main"}
 ```
 
 Then import in your Noir source:

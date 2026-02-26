@@ -2,14 +2,14 @@ use aztec::oracle::logging::debug_log_format;
 
 // Max x where to_wad(x) doesn't overflow u128
 // x <= floor((2^128 - 1) / 10^18)
-global MAX_WAD_CONVERTIBLE: u128 = 340_282_366_920_938_463_463u128;
+pub global MAX_WAD_CONVERTIBLE: u128 = 340_282_366_920_938_463_463u128;
 
 // Max x where to_wad(x) passes the 2^127 range check in wad_mul_div
 // x < floor(2^127 / 10^18)
-global MAX_WAD_MUL_DIV_INT: u128 = 170_141_183_460_469_231_731u128;
+pub global MAX_WAD_MUL_DIV_INT: u128 = 170_141_183_460_469_231_731u128;
 
 // Max x where wad_mul(to_wad(x), to_wad(x)) result is still < 2^127
-global MAX_WAD_MUL_INT: u128 = 13_043_817_825u128;
+pub global MAX_WAD_MUL_INT: u128 = 13_043_817_825u128;
 
 // 2^128 and 2^128 - 1 as Field literals
 global U128_MAX: Field = 0xffffffffffffffffffffffffffffffff;
