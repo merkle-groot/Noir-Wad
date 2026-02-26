@@ -293,7 +293,7 @@ pub fn wad_mul_div(a: Field, b: Field, d: Field) -> Field {
     let (quotient, remainder) = unsafe { unconstrained_mul_div(a_int, b_int, d_int) };
 
     // Range checks
-    let _q_check = quotient as u128; 
+    let q_check = quotient as u128; 
     let r_int = remainder as u128;
     let d_int = d as u128;
 

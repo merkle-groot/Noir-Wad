@@ -1,6 +1,6 @@
 # wad.nr
 
-A WAD (Wei-As-Decimal) fixed-point arithmetic library for Noir, targeting the Aztec Network. Provides safe 18-decimal fixed-point math with overflow-resistant `mul_div` operations suitable for use in zero-knowledge circuits.
+A WAD (Wei-As-Decimal) fixed-point arithmetic library for Noir, targeting the Aztec Network. Provides safe 18-decimal fixed-point math with overflow-resistant `mul_div` operations.
 
 ---
 
@@ -67,28 +67,13 @@ wad_div(1 * 10^18, 3 * 10^18)
 ```
 
 ---
-
-## What is WAD?
-
-WAD is a fixed-point number format borrowed from Ethereum's token standards (popularised by MakerDAO's DSMath). All values are scaled by `10^18` (one "WAD unit"). This lets you represent and compute with fractional values using only integer operations — no floating point required, which is essential for deterministic ZK circuits.
-
-```
-1.5  →  1_500_000_000_000_000_000  (1.5 × 10^18)
-0.5  →    500_000_000_000_000_000  (0.5 × 10^18)
-100  →  100_000_000_000_000_000_000 (100 × 10^18)
-```
-
-All values are stored as Noir `Field` elements internally.
-
----
-
 ## Installation
 
 Add the library to your `Nargo.toml`:
 
 ```toml
 [dependencies]
-wad = { path = "../wad_lib" }
+wad = { git = "https://github.com/merkle-groot/Noir-Wad" }
 ```
 
 Then import in your Noir source:
@@ -265,7 +250,7 @@ truncate(price); // == 3
 
 ## Comparison: wad_mul_div vs noir-bignum
 
-An alternative implementation using [noir-bignum](https://github.com/noir-lang/noir-bignum)'s `U256` type was evaluated. noir-bignum is a general-purpose arbitrary-precision library designed for operations like RSA, ECC, and cross-curve arithmetic where inputs can reach thousands of bits. This comparison exists to document why that approach was not used — not to criticise the library, which is excellent for its intended purpose.
+An alternative implementation using [noir-bignum](https://github.com/noir-lang/noir-bignum)'s `U256` type was evaluated. noir-bignum is a general-purpose arbitrary-precision library designed for operations like RSA, ECC, and cross-curve arithmetic where inputs can reach thousands of bits. This comparison exists to document why that approach was not used.
 
 ### Opcode counts
 
