@@ -1,0 +1,7 @@
+[package]
+name = "bignum_mul_div_profil"
+type = "bin"
+authors = [""]
+
+[dependencies]
+bignum = { path = "../../noir-bignum" }
