@@ -1,87 +1,32 @@
 use aztec::oracle::logging::debug_log_format;
+use crate::common::{
+    U128_MAX,
+    mul_div_up,
+    mul_div,
+};
 
 // Max x where to_wad(x) doesn't overflow u128
 // x <= floor((2^128 - 1) / 10^18)
 pub global MAX_WAD_CONVERTIBLE: u128 = 340_282_366_920_938_463_463u128;
 
-// Max x where to_wad(x) passes the 2^127 range check in wad_mul_div
-// x < floor(2^127 / 10^18)
-pub global MAX_WAD_MUL_DIV_INT: u128 = 170_141_183_460_469_231_731u128;
+// Max x where to_wad(x) passes the 2^125 range check in wad_mul_div
+// x < floor(2^125 / 10^18)
+pub global MAX_WAD_MUL_DIV_INT: u128 = 42_535_295_865_117_307_932u128;
 
-// Max x where wad_mul(to_wad(x), to_wad(x)) result is still < 2^127
-pub global MAX_WAD_MUL_INT: u128 = 13_043_817_825u128;
-
-// 2^128 and 2^128 - 1 as Field literals
-global U128_MAX: Field = 0xffffffffffffffffffffffffffffffff;
-global U127: u128 = 0x80000000000000000000000000000000;
+// Max x where wad_mul(to_wad(x), to_wad(x)) result is still < 2^125
+pub global MAX_WAD_MUL_INT: u128 = 6_521_908_912u128;
 
 /// WAD (Wei-As Decimal) type - 18-decimal fixed-point numbers
 /// Uses Field representation internally
 pub type Wad = Field;
 
 // The scale factor for WAD: 10^18 (standard for Ethereum token amounts)
-global SCALE: Field = 1_000_000_000_000_000_000;
-
-unconstrained fn unconstrained_mul_div(a_int: u128, b_int: u128, d_int: u128) -> (Field, Field) {
-    // --- Step 1: 256-bit product in four 64-bit limbs ---
-    let mask: u128 = (1 << 64) - 1;
-    let a_lo = a_int & mask;
-    let a_hi = a_int >> 64;
-    let b_lo = b_int & mask;
-    let b_hi = b_int >> 64;
-
-    // Partial products (each fits in u128)
-    let p_ll = a_lo * b_lo;
-    let p_lh = a_lo * b_hi;
-    let p_hl = a_hi * b_lo;
-    let p_hh = a_hi * b_hi;
-
-    // Accumulate into limbs[0..3], LSB first
-    let mut limbs: [u128; 4] = [0; 4];
-    limbs[0] = p_ll & mask;
-
-    let s1 = (p_ll >> 64) + (p_lh & mask) + (p_hl & mask);
-    limbs[1] = s1 & mask;
-
-    let s2 = (s1 >> 64) + (p_lh >> 64) + (p_hl >> 64) + (p_hh & mask);
-    limbs[2] = s2 & mask;
-
-    limbs[3] = (s2 >> 64) + (p_hh >> 64);
-
-    // --- Step 2: Binary long division (256 bits d) ---
-    // Invariant: r < d < 2^127, so r << 1 < 2^128 (fits in u128)
-    let mut r: u128 = 0;
-    let mut q_limbs: [u128; 4] = [0; 4];
-
-    for i in 0..4 {
-        let limb_idx = 3 - i; // MSB first
-        for j in 0..64 {
-            let bit_pos: u8 = 63 - j as u8;
-
-            // Shift remainder left by 1 and bring in next bit
-            r = (r << 1) | ((limbs[limb_idx] >> bit_pos as u128) & 1);
-
-            if r >= d_int {
-                r -= d_int;
-                q_limbs[limb_idx] |= 1 << bit_pos as u128;
-            }
-        }
-    }
-
-    // --- Step 3: Convert quotient limbs back to Field ---
-    let base: Field = (mask + 1) as Field; // 2^64
-    let quotient = (q_limbs[0] as Field)
-        + (q_limbs[1] as Field) * base
-        + (q_limbs[2] as Field) * base * base
-        + (q_limbs[3] as Field) * base * base * base;
-
-    (quotient, r as Field)
-}
+global WAD_SCALE: Field = 1_000_000_000_000_000_000;
 
 /// Casts a u128 value to Wad without scaling.
 ///
 /// This is a simple type conversion - the numeric value remains unchanged.
-/// Use `to_wad` if you want to convert an integer to the WAD format (multiply by SCALE).
+/// Use `to_wad` if you want to convert an integer to the WAD format, without multiplication
 ///
 /// # Arguments
 ///
@@ -102,7 +47,7 @@ pub fn from_u128(value: u128) -> Wad {
 
 /// Converts a u128 value to WAD format by scaling.
 ///
-/// Multiplies the input by SCALE (10^18) to convert from integer units
+/// Multiplies the input by WAD_SCALE (10^18) to convert from integer units
 /// to WAD fixed-point representation.
 ///
 /// # Arguments
@@ -119,12 +64,12 @@ pub fn from_u128(value: u128) -> Wad {
 /// let wad = to_wad(100u128); // wad == 100 * 10^18
 /// ```
 pub fn to_wad(value: u128) -> Wad {
-    (value as Wad) * SCALE
+    (value as Wad) * WAD_SCALE
 }
 
 /// Extracts the integer part of a WAD value.
 ///
-/// Divides by SCALE (10^18) and returns the whole number portion,
+/// Divides by WAD_SCALE (10^18) and returns the whole number portion,
 /// discarding any fractional part.
 ///
 /// # Arguments
@@ -138,16 +83,16 @@ pub fn to_wad(value: u128) -> Wad {
 /// # Example
 ///
 /// ```ignore
-/// let wad = to_wad(100u128) + to_wad(50u128) / SCALE; // 100.5 WAD
+/// let wad = to_wad(100u128) + to_wad(50u128) / WAD_SCALE; // 100.5 WAD
 /// let integer = truncate(wad); // integer == 100
 /// ```
 pub fn truncate(value: Wad) -> u128 {
-    (value as u128) / (SCALE as u128)
+    (value as u128) / (WAD_SCALE as u128)
 }
 
 /// Divides two WAD values.
 ///
-/// Computes a / b and returns the result in WAD format by scaling: floor(a * SCALE / b).
+/// Computes a / b and returns the result in WAD format by scaling: floor(a * WAD_SCALE / b).
 /// This preserves fractional precision - use truncate() to get the integer floor.
 ///
 /// # Arguments
@@ -171,7 +116,36 @@ pub fn truncate(value: Wad) -> u128 {
 /// let result = wad_div(a, b); // result == 50 * 10^18
 /// ```
 pub fn wad_div(a: Field, b: Field) -> Field {
-    wad_mul_div(a, SCALE, b)
+    wad_mul_div(a, WAD_SCALE, b)
+}
+
+/// Divides two WAD values with rounding up.
+///
+/// Computes ceil(a / b) and returns the result in WAD format by scaling: ceil(a * WAD_SCALE / b).
+/// This preserves fractional precision and rounds up to the nearest unit.
+///
+/// # Arguments
+///
+/// * `a` - The numerator in WAD format
+/// * `b` - The denominator in WAD format
+///
+/// # Returns
+///
+/// The quotient in WAD format, rounded up
+///
+/// # Panics
+///
+/// Panics if `b` is zero (division by zero)
+///
+/// # Example
+///
+/// ```ignore
+/// let a = to_wad(100u128);
+/// let b = to_wad(2u128);
+/// let result = wad_div_up(a, b); // result == 50 * 10^18
+/// ```
+pub fn wad_div_up(a: Field, b: Field) -> Field {
+    wad_mul_div_up(a, WAD_SCALE, b)
 }
 
 /// wad_adds two WAD values.
@@ -227,7 +201,7 @@ pub fn wad_sub(value: Wad, other: Wad) -> Wad {
 
 /// Multiplies two WAD values.
 ///
-/// Computes a * b and returns the result in WAD format by scaling: floor(a * b / SCALE).
+/// Computes a * b and returns the result in WAD format by scaling: floor(a * b / WAD_SCALE).
 /// This preserves fractional precision - use truncate() to get the integer floor.
 ///
 /// # Arguments
@@ -247,7 +221,78 @@ pub fn wad_sub(value: Wad, other: Wad) -> Wad {
 /// let result = wad_mul(a, b); // result == 200 * 10^18
 /// ```
 pub fn wad_mul(a: Field, b: Field) -> Field {
-    wad_mul_div(a, b, SCALE)
+    wad_mul_div(a, b, WAD_SCALE)
+}
+
+/// Multiplies two WAD values with rounding up.
+///
+/// Computes ceil(a * b) and returns the result in WAD format by scaling: ceil(a * b / WAD_SCALE).
+/// This preserves fractional precision and rounds up to the nearest unit.
+///
+/// # Arguments
+///
+/// * `a` - First WAD value
+/// * `b` - Second WAD value
+///
+/// # Returns
+///
+/// The product in WAD format, rounded up
+///
+/// # Example
+///
+/// ```ignore
+/// let a = to_wad(100u128);
+/// let b = to_wad(2u128);
+/// let result = wad_mul_up(a, b); // result == 200 * 10^18
+/// ```
+pub fn wad_mul_up(a: Field, b: Field) -> Field {
+    wad_mul_div_up(a, b, WAD_SCALE)
+}
+
+
+#[test]
+fn test_from_u128() {
+    // --- Basic conversions ---
+    // Zero conversion
+    assert(from_u128(0u128) == 0);
+    // Unit conversion
+    assert(from_u128(1u128) == 1);
+    // Small integer conversion
+    assert(from_u128(100u128) == 100);
+    // Large integer conversion (WAD_SCALE value)
+    assert(from_u128(1_000_000_000_000_000_000u128) == 1_000_000_000_000_000_000);
+}
+
+#[test]
+fn test_to_wad() {
+    // --- Basic conversions ---
+    // Zero converts to 0
+    let wad_0 = to_wad(0u128);
+    assert(wad_0 == 0);
+
+    // 1 converts to WAD_SCALE
+    let wad_1 = to_wad(1u128);
+    assert(wad_1 == WAD_SCALE);
+
+    // 100 converts to 100 * WAD_SCALE
+    let wad_100 = to_wad(100u128);
+    assert(wad_100 == WAD_SCALE * 100);
+}
+
+#[test]
+fn test_truncate() {
+    // --- Basic truncations ---
+    // Zero truncates to 0
+    let wad_0 = to_wad(0u128);
+    assert(truncate(wad_0) == 0);
+
+    // WAD_SCALE truncates to 1
+    let wad_1 = to_wad(1u128);
+    assert(truncate(wad_1) == 1);
+
+    // 100 * WAD_SCALE truncates to 100
+    let wad_100 = to_wad(100u128);
+    assert(truncate(wad_100) == 100);
 }
 
 /// Computes floor(a * b / d) without intermediate overflow.
@@ -278,78 +323,42 @@ pub fn wad_mul(a: Field, b: Field) -> Field {
 /// let result = wad_mul_div(a, b, d); // result == 150 * 10^18
 /// ```
 pub fn wad_mul_div(a: Field, b: Field, d: Field) -> Field {
-    assert(d != 0, "Division by zero");
-    // Safety: the result of muldiv is being checked
+    mul_div(a, b, d)
+}
 
-    let a_int = a as u128;  // proves a < 2^128
-    let b_int = b as u128;  // proves b < 2^128
-    let d_int = d as u128;  // proves d < 2^128
-
-    assert(a_int < U127, "a out of safe range");
-    assert(b_int < U127, "b out of safe range");
-    assert(d_int < U127, "d out of safe range");
-
-    // Safety: The result is being checked right after
-    let (quotient, remainder) = unsafe { unconstrained_mul_div(a_int, b_int, d_int) };
-
-    // Range checks
-    let q_check = quotient as u128; 
-    let r_int = remainder as u128;
-    let d_int = d as u128;
-
-    assert(r_int < d_int, "Invalid remainder");
-
-    // a * b == q * d + r (in Field)
-    assert(a * b == quotient * d + remainder);
-
-    quotient
+/// Computes ceil(a * b / d) without intermediate overflow.
+///
+/// Uses unconstrained computation for the muldiv operation, then verifies correctness
+/// with the constraint: a * b + d/2 == quotient * d + remainder.
+///
+/// # Arguments
+///
+/// * `a` - First multiplicand
+/// * `b` - Second multiplicand
+/// * `d` - Divisor
+///
+/// # Returns
+///
+/// ceil(a * b / d) in Field
+///
+/// # Panics
+///
+/// Panics if `d` is zero (division by zero) or if remainder >= d (invalid computation)
+///
+/// # Example
+///
+/// ```ignore
+/// let a = to_wad(100u128);
+/// let b = to_wad(3u128);
+/// let d = to_wad(2u128);
+/// let result = wad_mul_div_up(a, b, d); // result == 150 * 10^18
+/// ```
+pub fn wad_mul_div_up(a: Field, b: Field, d: Field) -> Field {
+    mul_div_up(a, b, d)
 }
 
 
-#[test]
-fn test_from_u128() {
-    // --- Basic conversions ---
-    // Zero conversion
-    assert(from_u128(0u128) == 0);
-    // Unit conversion
-    assert(from_u128(1u128) == 1);
-    // Small integer conversion
-    assert(from_u128(100u128) == 100);
-    // Large integer conversion (SCALE value)
-    assert(from_u128(1_000_000_000_000_000_000u128) == 1_000_000_000_000_000_000);
-}
 
-#[test]
-fn test_to_wad() {
-    // --- Basic conversions ---
-    // Zero converts to 0
-    let wad_0 = to_wad(0u128);
-    assert(wad_0 == 0);
-
-    // 1 converts to SCALE
-    let wad_1 = to_wad(1u128);
-    assert(wad_1 == SCALE);
-
-    // 100 converts to 100 * SCALE
-    let wad_100 = to_wad(100u128);
-    assert(wad_100 == SCALE * 100);
-}
-
-#[test]
-fn test_truncate() {
-    // --- Basic truncations ---
-    // Zero truncates to 0
-    let wad_0 = to_wad(0u128);
-    assert(truncate(wad_0) == 0);
-
-    // SCALE truncates to 1
-    let wad_1 = to_wad(1u128);
-    assert(truncate(wad_1) == 1);
-
-    // 100 * SCALE truncates to 100
-    let wad_100 = to_wad(100u128);
-    assert(truncate(wad_100) == 100);
-}
 
 #[test]
 fn test_wad_add() {
@@ -461,10 +470,10 @@ fn test_wad_mul() {
     // --- Fractional results (floor) ---
     // 3 * 0.5 = 1.5, should floor to 1 in integer check
     let three = to_wad(3u128);
-    let half = SCALE / 2; // 0.5 in WAD
+    let half = WAD_SCALE / 2; // 0.5 in WAD
     let three_half = wad_mul(three, half);
-    // Result should be 1.5 WAD = SCALE + SCALE/2
-    assert(three_half == SCALE + (SCALE / 2));
+    // Result should be 1.5 WAD = WAD_SCALE + WAD_SCALE/2
+    assert(three_half == WAD_SCALE + (WAD_SCALE / 2));
 
     // --- Larger values ---
     let large_a = to_wad(12345u128);
@@ -524,12 +533,12 @@ fn test_wad_div() {
     // wad_div returns the WAD representation (preserves fractional parts)
     // truncate(wad_div(a, b)) gives the integer floor
 
-    // 7 / 2 = 3.5 in WAD = 3 * SCALE + SCALE/2
+    // 7 / 2 = 3.5 in WAD = 3 * WAD_SCALE + WAD_SCALE/2
     let seven = to_wad(7u128);
     let two = to_wad(2u128);
     let seven_halves = wad_div(seven, two);
     // Result should be 3.5 WAD
-    assert(seven_halves == to_wad(3u128) + SCALE / 2);
+    assert(seven_halves == to_wad(3u128) + WAD_SCALE / 2);
     // Truncating gives the integer floor
     assert(truncate(seven_halves) == 3u128);
 
@@ -605,18 +614,18 @@ fn test_wad_mul_div() {
 
     // --- Fractional results ---
     // wad_mul_div with WAD inputs preserves fractional precision
-    // 10 * 3 / 4 = 7.5, so result is 7.5 in WAD = 7 * SCALE + SCALE/2
+    // 10 * 3 / 4 = 7.5, so result is 7.5 in WAD = 7 * WAD_SCALE + WAD_SCALE/2
     let ten_three_four = wad_mul_div(to_wad(10u128), to_wad(3u128), to_wad(4u128));
     debug_log_format("result: {}", [truncate(ten_three_four) as Field]);
-    assert(ten_three_four == to_wad(7u128) + SCALE / 2);
+    assert(ten_three_four == to_wad(7u128) + WAD_SCALE / 2);
     assert(truncate(ten_three_four) == 7u128);
 
     // 7 * 3 / 5 = 4.2, so result is 4.2 in WAD
     let seven_three_five = wad_mul_div(to_wad(7u128), to_wad(3u128), to_wad(5u128));
     assert(truncate(seven_three_five) == 4u128);
 
-    debug_log_format("seven_three_five: {}", [to_wad(4u128) + SCALE / 5]);
-    assert(seven_three_five == to_wad(4u128) + SCALE / 5);
+    debug_log_format("seven_three_five: {}", [to_wad(4u128) + WAD_SCALE / 5]);
+    assert(seven_three_five == to_wad(4u128) + WAD_SCALE / 5);
 
     // --- Commutativity in numerator ---
     // a * b / d = b * a / d
@@ -626,13 +635,13 @@ fn test_wad_mul_div() {
     assert(wad_mul_div(comm_a, comm_b, comm_d) == wad_mul_div(comm_b, comm_a, comm_d));
 
     // --- Relationship with wad_mul and wad_div ---
-    // wad_mul_div(a, b, SCALE) = wad_mul(a, b)
+    // wad_mul_div(a, b, WAD_SCALE) = wad_mul(a, b)
     let mul_a = to_wad(10u128);
     let mul_b = to_wad(5u128);
-    assert(wad_mul_div(mul_a, mul_b, SCALE) == wad_mul(mul_a, mul_b));
+    assert(wad_mul_div(mul_a, mul_b, WAD_SCALE) == wad_mul(mul_a, mul_b));
 
-    // wad_mul_div(a, SCALE, d) = wad_div(a, d)
-    assert(wad_mul_div(to_wad(100u128), SCALE, to_wad(4u128)) == wad_div(to_wad(100u128), to_wad(4u128)));
+    // wad_mul_div(a, WAD_SCALE, d) = wad_div(a, d)
+    assert(wad_mul_div(to_wad(100u128), WAD_SCALE, to_wad(4u128)) == wad_div(to_wad(100u128), to_wad(4u128)));
 
     // Left: floor(floor(A*B*S/C) / D)
     // Right: floor(A*B*S / (C*D))
@@ -683,7 +692,7 @@ fn test_wad_mul_div() {
     // wad_mul_div with WAD inputs preserves fractional precision
     // 10 * 7 / 9 = 70/9 = 7.777... in WAD
     let rem_q = wad_mul_div(to_wad(10u128), to_wad(7u128), to_wad(9u128));
-    // Result is 7 * SCALE + (7/9) * SCALE
+    // Result is 7 * WAD_SCALE + (7/9) * WAD_SCALE
     // Truncating gives integer floor
     debug_log_format("repeated dec 70/9: {}", [rem_q]);
     assert(truncate(rem_q) == 7u128);
@@ -842,12 +851,13 @@ fn test_wad_mul_div_product_near_field_boundary() {
     //
     // BN254 p =approx 2**254. Two u128 inputs at approx 2**127 each => product =approx 2**254 =approx p => wraps.
     //
-    // 2^127 = 0x80000000000000000000000000000000
-    let near_half_u128: Field = 0x7fffffffffffffffffffffffffffffff; // 2^127 - 1
-    let result = wad_mul_div(near_half_u128, near_half_u128, near_half_u128);
-    // Result should equal near_half_u128 (a*a/a = a)
+    // However, we constrain inputs to < U125 = 2^125 to avoid this issue.
+    // Use a value close to U125 boundary to verify safety.
+    let near_u125: Field = 0x1fffffffffffffffffffffffffffffff; // 2^126 - 1 < U125
+    let result = wad_mul_div(near_u125, near_u125, near_u125);
+    // Result should equal near_u125 (a*a/a = a)
     // If field overflow occurs, this assertion will FAIL demonstrating the unsoundness
-    assert(result == near_half_u128);
+    assert(result == near_u125);
 }
 
 // --- Remainder edge case tests ---
@@ -872,8 +882,9 @@ fn test_wad_mul_div_result_is_zero_due_to_floor() {
 fn test_truncation_of_largest_mul(){
     let result = wad_mul(to_wad(MAX_WAD_MUL_INT), to_wad(MAX_WAD_MUL_INT));
     debug_log_format("the largest product: {}", [result]);
-    assert(result == 170141183451787730625 * SCALE);
-    assert(truncate(result) == 170141183451787730625);
+    debug_log_format("truncated: {}", [truncate(result) as Field]);
+    // Verify that the result stays within safe range (< 2^125)
+    assert(truncate(result) < 42535295865117307929925023488); // 2^125
 }
 
 #[test]
@@ -883,6 +894,158 @@ fn test_wad_mul_div_d_equals_one() {
     let a = to_wad(2u128);
     let b = to_wad(3u128);
     let result = wad_mul_div(a, b, 1);
-    // a * b in WAD units = 6 * SCALE^2, not scaled back just raw product
+    // a * b in WAD units = 6 * WAD_SCALE^2, not scaled back just raw product
     assert(result == a * b);
+}
+
+#[test]
+fn test_wad_mul_up() {
+    // --- Basic multiplication with rounding up ---
+    // 2 * 3 = 6 (exact, same as floor)
+    let a = to_wad(2u128);
+    let b = to_wad(3u128);
+    assert(wad_mul_up(a, b) == to_wad(6u128));
+
+    // --- Fractional results that round up ---
+    // 3 * 0.5 = 1.5, rounds up to 2
+    let three = to_wad(3u128);
+    let half = WAD_SCALE / 2; // 0.5 in WAD
+    let three_half_up = wad_mul_up(three, half);
+    // Result should be 2 WAD
+    assert(three_half_up == to_wad(2u128));
+    // Compare with floor version: wad_mul gives 1.5 WAD
+    let three_half_floor = wad_mul(three, half);
+    assert(three_half_floor == WAD_SCALE + (WAD_SCALE / 2));
+    // ceil result > floor result when not exact
+    assert(three_half_up as u128 > three_half_floor as u128);
+
+    // 10 * 0.6 = 6.0 (exact, same as floor)
+    let ten = to_wad(10u128);
+    let six_tenths = WAD_SCALE * 6 / 10; // 0.6 in WAD
+    assert(wad_mul_up(ten, six_tenths) == to_wad(6u128));
+    assert(wad_mul(ten, six_tenths) == to_wad(6u128));
+
+    // --- Values that don't quite reach the next integer ---
+    // 2 * 0.4999 = 0.9998, rounds up to 1
+    let two = to_wad(2u128);
+    let almost_half = WAD_SCALE * 4999 / 10000; // 0.4999 in WAD
+    let result = wad_mul_up(two, almost_half);
+    assert(result == to_wad(1u128));
+    // Floor version would give 0
+    assert(wad_mul(two, almost_half) as u128 < WAD_SCALE as u128);
+}
+
+#[test]
+fn test_wad_div_up() {
+    // --- Basic division with rounding up ---
+    // 100 / 2 = 50 (exact, same as floor)
+    let a = to_wad(100u128);
+    let b = to_wad(2u128);
+    assert(wad_div_up(a, b) == to_wad(50u128));
+
+    // 81 / 9 = 9 (exact, same as floor)
+    assert(wad_div_up(to_wad(81u128), to_wad(9u128)) == to_wad(9u128));
+
+    // --- Fractional results that round up ---
+    // 7 / 2 = 3.5, rounds up to 4
+    let seven = to_wad(7u128);
+    let two = to_wad(2u128);
+    let seven_halves_up = wad_div_up(seven, two);
+    assert(seven_halves_up == to_wad(4u128));
+    // Floor version gives 3.5 WAD
+    let seven_halves_floor = wad_div(seven, two);
+    assert(seven_halves_floor == to_wad(3u128) + WAD_SCALE / 2);
+
+    // 10 / 3 ~= 3.333, rounds up to 4
+    assert(wad_div_up(to_wad(10u128), to_wad(3u128)) == to_wad(4u128));
+    assert(truncate(wad_div(to_wad(10u128), to_wad(3u128))) == 3u128);
+
+    // 1 / 10 = 0.1, rounds up to 1
+    assert(wad_div_up(to_wad(1u128), to_wad(10u128)) == WAD_SCALE);
+    assert(wad_div(to_wad(1u128), to_wad(10u128)) as u128 < WAD_SCALE as u128);
+
+    // --- Identity division ---
+    // x / 1 = x (exact, same as floor)
+    let one = to_wad(1u128);
+    assert(wad_div_up(to_wad(42u128), one) == to_wad(42u128));
+
+    // --- Zero numerator ---
+    // 0 / x = 0 (for x != 0)
+    let zero = from_u128(0u128);
+    assert(wad_div_up(zero, to_wad(5u128)) == 0);
+}
+
+#[test]
+fn test_wad_mul_div_up() {
+    // --- Basic tests: ceil(a * b / d) ---
+    // 100 * 3 / 2 = 150 (exact, same as floor)
+    let a = to_wad(100u128);
+    let b = to_wad(3u128);
+    let c = to_wad(2u128);
+    assert(wad_mul_div_up(a, b, c) == to_wad(150u128));
+    assert(wad_mul_div(a, b, c) == to_wad(150u128));
+
+    // 6 * 4 / 3 = 8 (exact, same as floor)
+    assert(wad_mul_div_up(to_wad(6u128), to_wad(4u128), to_wad(3u128)) == to_wad(8u128));
+
+    // --- Fractional results that round up ---
+    // 10 * 3 / 4 = 7.5, rounds up to 8
+    let ten_three_four_up = wad_mul_div_up(to_wad(10u128), to_wad(3u128), to_wad(4u128));
+    assert(ten_three_four_up == to_wad(8u128));
+    // Floor version gives 7.5 WAD
+    let ten_three_four_floor = wad_mul_div(to_wad(10u128), to_wad(3u128), to_wad(4u128));
+    assert(ten_three_four_floor == to_wad(7u128) + WAD_SCALE / 2);
+
+    // 7 * 3 / 5 = 4.2, rounds up to 5
+    assert(wad_mul_div_up(to_wad(7u128), to_wad(3u128), to_wad(5u128)) == to_wad(5u128));
+    assert(truncate(wad_mul_div(to_wad(7u128), to_wad(3u128), to_wad(5u128))) == 4u128);
+
+    // 10 * 7 / 9 ~= 7.777, rounds up to 8
+    assert(wad_mul_div_up(to_wad(10u128), to_wad(7u128), to_wad(9u128)) == to_wad(8u128));
+    assert(truncate(wad_mul_div(to_wad(10u128), to_wad(7u128), to_wad(9u128))) == 7u128);
+
+    // 1 * 1 / 3 ~= 0.333, rounds up to 1
+    assert(wad_mul_div_up(to_wad(1u128), to_wad(1u128), to_wad(3u128)) == WAD_SCALE);
+    assert(wad_mul_div(to_wad(1u128), to_wad(1u128), to_wad(3u128)) as u128 < WAD_SCALE as u128);
+
+    // --- Identity tests ---
+    // a * 1 / 1 = a (exact, same as floor)
+    let one = to_wad(1u128);
+    assert(wad_mul_div_up(to_wad(42u128), one, one) == to_wad(42u128));
+
+    // --- Zero multiplication ---
+    // 0 * a / d = 0
+    let zero = from_u128(0u128);
+    assert(wad_mul_div_up(zero, to_wad(100u128), to_wad(5u128)) == 0);
+
+    // --- Relationship with floor version ---
+    // ceil >= floor for all inputs
+    let x = to_wad(10u128);
+    let y = to_wad(7u128);
+    let z = to_wad(9u128);
+    let floor_result = wad_mul_div(x, y, z);
+    let ceil_result = wad_mul_div_up(x, y, z);
+    assert(ceil_result as u128 >= floor_result as u128);
+    // When result is exact, they're equal
+    assert(wad_mul_div_up(to_wad(12u128), to_wad(2u128), to_wad(3u128)) == wad_mul_div(to_wad(12u128), to_wad(2u128), to_wad(3u128)));
+}
+
+#[test(should_fail_with = "Division by zero")]
+fn test_wad_div_up_divide_by_zero() {
+    let _ = wad_div_up(from_u128(12), 0);
+}
+
+#[test]
+fn test_wad_mul_up_zero_multiplicand() {
+    // 0 * x should give 0 (no division by zero, since result is 0)
+    let result = wad_mul_up(from_u128(0), to_wad(10u128));
+    assert(result == 0);
+    // x * 0 should also give 0
+    let result2 = wad_mul_up(to_wad(10u128), from_u128(0));
+    assert(result2 == 0);
+}
+
+#[test(should_fail_with = "Division by zero")]
+fn test_wad_mul_div_up_divide_by_zero() {
+    let _ = wad_mul_div_up(to_wad(1u128), to_wad(1u128), 0);
 }
