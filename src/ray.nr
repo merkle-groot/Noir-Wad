@@ -21,7 +21,7 @@ pub global MAX_RAY_MUL_INT: u128 = 206_240u128;
 pub type Ray = Field;
 
 // The scale factor for RAY: 10^27
-global RAY_SCALE: Field = 1_000_000_000_000_000_000_000_000_000;
+pub global RAY_SCALE: Field = 1_000_000_000_000_000_000_000_000_000;
 
 /// Casts a u128 value to Ray without scaling.
 ///
@@ -310,6 +310,15 @@ pub fn ray_mul_div(a: Field, b: Field, d: Field) -> Field {
 pub fn ray_mul_div_up(a: Field, b: Field, d: Field) -> Field {
     mul_div_up(a, b, d)
 }
+
+pub fn ray_int_div(a: Ray, b: u128) -> Ray {
+    ((a as u128) / b) as Ray
+}
+
+pub fn ray_int_mul(a: Ray, b: u128) -> Ray {
+    (a as u128 * b) as Ray
+}
+
 
 #[test]
 fn test_from_u128() {

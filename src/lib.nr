@@ -4,6 +4,8 @@
 mod wad;
 mod common;
 mod ray;
+mod percentMath;
+mod utilities;
 
 pub use wad::{
     from_u128,

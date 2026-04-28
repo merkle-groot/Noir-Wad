@@ -9,3 +9,4 @@ store/
 .tsbuildinfo
 .env
 python3/
+.claude

@@ -358,6 +358,14 @@ pub fn wad_mul_div_up(a: Field, b: Field, d: Field) -> Field {
 }
 
 
+pub fn int_div(a: Wad, b: u128) -> Wad {
+    ((a as u128) / b) as Wad
+}
+
+pub fn int_mul(a: Wad, b: u128) -> Wad {
+    (a as u128 * b) as Wad
+}
+
 
 
 #[test]
